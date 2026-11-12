@@ -19,3 +19,8 @@ cp -R node_modules/@bokuweb/zstd-wasm dist/node_modules/@bokuweb/
 # The recorded beats (beats/make.mjs): the audio and its index, not the script.
 mkdir -p dist/beats && cp beats/index.json beats/*.pcm dist/beats/
 echo '{"type":"module"}' > dist/package.json
+# The phone page, served by the phone bridge (bridge.mjs): the page, the shared creature files and its fonts.
+mkdir -p dist/phone/onboarding/fonts
+cp ../../phone.html dist/phone/
+cp -R ../../roamies dist/phone/
+cp ../../onboarding/fonts/martian-mono.woff2 ../../onboarding/fonts/doto.woff2 dist/phone/onboarding/fonts/

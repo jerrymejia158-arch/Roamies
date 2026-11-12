@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0b0d12">
+<meta name="referrer" content="no-referrer">
+<title>Roamies</title>
+<style>
+  @font-face { font-family: "Martian Mono"; src: url("onboarding/fonts/martian-mono.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
+  @font-face { font-family: "Doto"; src: url("onboarding/fonts/doto.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+  :root { --bg: #0b0d12; --panel: #151922; --line: #262c3a; --ink: #e9ecf3; --quiet: #8b93a7; --accent: #7cc4ff; --warn: #ffb86b; --bad: #ff7b7b; --ok: #7be0a3; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; overscroll-behavior: none;
+    font: 500 14px/1.4 "Martian Mono", ui-monospace, Menlo, Consolas, monospace; -webkit-tap-highlight-color: transparent; }
+  /* Sized and moved by core.js to cover just what's drawn. */
+  canvas { position: fixed; left: 0; top: 0; display: block; touch-action: none; transform-origin: 0 0; will-change: transform; -webkit-user-select: none; user-select: none; }
+
+  #status { position: fixed; top: calc(env(safe-area-inset-top) + 10px); left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--quiet); font-size: 12px; white-space: nowrap; }
+  #status i { width: 8px; height: 8px; border-radius: 50%; background: var(--quiet); }
+  #status[data-link="paired"] i { background: var(--ok); }
+  #status[data-link="connecting"] i, #status[data-link="lost"] i { background: var(--warn); }
+  #status[data-link="refused"] i { background: var(--bad); }
+
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; gap: 8px; align-items: flex-end;
+    padding: 10px 12px calc(env(safe-area-inset-bottom) + 10px); background: linear-gradient(to top, var(--bg) 70%, transparent); }
+  #text { flex: 1; min-width: 0; min-height: 44px; max-height: 120px; box-sizing: border-box; resize: none; padding: 11px 14px; border: 1px solid var(--line); border-radius: 22px;
+    background: var(--panel); color: var(--ink); font: inherit; outline: none; }
+  #text:focus { border-color: var(--accent); }
+  #text::placeholder { color: var(--quiet); }
+  button { font: inherit; color: var(--ink); border: 1px solid var(--line); background: var(--panel); border-radius: 22px; min-width: 44px; height: 44px; padding: 0 14px; }
+  button:active { transform: scale(0.97); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #mic[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #06121c; }
+  #mic[hidden], #stop[hidden] { display: none; }
+
+  #pair { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(5, 6, 9, 0.86); }
+  #pair.open { display: flex; }
+  #pair form { width: 100%; max-width: 360px; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+  #pair h1 { margin: 0 0 6px; font: 800 22px/1.2 "Doto", "Martian Mono", monospace; }
+  #pair p { margin: 0 0 14px; color: var(--quiet); font-size: 13px; }
+  #pair input { width: 100%; box-sizing: border-box; height: 44px; padding: 0 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font: inherit; }
+  #pair button { width: 100%; background: var(--accent); border-color: var(--accent); color: #06121c; border-radius: 10px; }
+  #pair .err { color: var(--bad); min-height: 18px; margin: 0 0 8px; }
+  @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
+</style>
+</head>
+<body>
+<canvas id="stage" aria-label="Your Roamie"></canvas>
+
+<div id="status" role="status" aria-live="polite" data-link="off"><i></i><span id="status-text">Not paired</span></div>
+
+<div id="bar">
+  <textarea id="text" rows="1" placeholder="Ask your Roamie" aria-label="Message for your Roamie" enterkeyhint="send" autocomplete="off"></textarea>
+  <button id="stop" type="button" hidden>Stop</button>
+  <button id="mic" type="button" aria-pressed="false" aria-label="Talk">Talk</button>
+</div>
+
+<div id="pair" role="dialog" aria-modal="true" aria-labelledby="pair-title">
+  <form id="pair-form">
+    <h1 id="pair-title">Pair with your computer</h1>
+    <p>Type the pairing code from the computer that runs Roamies. It is kept in this browser only.</p>
+    <p class="err" id="pair-err" role="alert"></p>
+    <input id="pair-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Pairing code" placeholder="Pairing code">
+    <button type="submit">Pair</button>
+  </form>
+</div>
+
+<script>window.ROAMIE_ONLY = ["sidekick"]; window.ROAMIE_UNIT = 300;</script>
+<script src="roamies/core.js"></script>
+<script src="roamies/markdown.js"></script>
+<script src="roamies/sfx.js"></script>
+<script src="roamies/voice-out.js"></script>
+<script src="roamies/glass.js"></script>
+<script src="roamies/agent.js"></script>
+<script src="roamies/agent-tools.js"></script>
+<script src="roamies/agent-cards.js"></script>
+<script src="roamies/agent-panel.js"></script>
+<script src="roamies/jarvis.js"></script>
+<script src="roamies/people.js"></script>
+<script src="roamies/10-dither.js"></script>
+<script src="roamies/12-sidekick.js"></script>
+<script>Roamie.bootDesktop(document.getElementById("stage")); document.fonts.load('500 13px "Martian Mono"');</script>
+<script src="roamies/ink3d.js"></script>
+<script src="roamies/world.js"></script>
+<script src="roamies/ink.js"></script>
+<script src="roamies/pen.js"></script>
+<script>document.fonts.load('800 16px "Doto"');</script>
+<script src="roamies/ask-bar.js"></script>
+<script src="roamies/host-phone.js"></script>
+<script src="roamies/host.js"></script>
+<script>
+(() => {
+  const P = window.RoamiePhone, $ = (id) => document.getElementById(id);
+  const text = $('text'), mic = $('mic'), stop = $('stop'), bar = $('bar'), pair = $('pair');
+
+  // Keep the Roamie clear of the status chip and the bar, and start it mid-screen rather than at a corner.
+  const safe = () => window.__roamieSafe?.({ top: 56, right: 0, bottom: bar.offsetHeight, left: 0 });
+  safe(); addEventListener('resize', safe);
+  window.__roamiePtr?.(innerWidth / 2, innerHeight * 0.45, performance.now());
+
+  const LABEL = { off: 'Not paired', connecting: 'Connecting to your computer', paired: 'Using your computer\'s brain', refused: 'Pairing code not accepted', lost: 'Computer unreachable, retrying' };
+  P.onChange((s) => {
+    $('status').dataset.link = s.link;
+    $('status-text').textContent = LABEL[s.link] + (s.link === 'paired' && s.lagMs != null ? ` · ${s.lagMs} ms` : '');
+    const needCode = s.link === 'off' || s.link === 'refused';
+    pair.classList.toggle('open', needCode);
+    $('pair-err').textContent = s.link === 'refused' ? 'That code was not accepted. Check it on the computer and try again.' : '';
+    if (needCode) $('pair-code').focus();
+    mic.setAttribute('aria-pressed', String(P.listening()));
+    mic.textContent = P.listening() ? 'Send' : 'Talk';
+  });
+  $('pair-form').addEventListener('submit', (e) => { e.preventDefault(); const v = $('pair-code').value; $('pair-code').value = ''; if (v.trim()) P.pair(v); });
+
+  const send = () => { const t = text.value.trim(); if (!t) return; text.value = ''; grow(); P.ask(t); text.blur(); };
+  const grow = () => { text.style.height = 'auto'; text.style.height = `${Math.min(120, text.scrollHeight)}px`; safe(); };
+  text.addEventListener('input', grow);
+  text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+
+  if (!P.canListen) mic.hidden = true; // no speech recognition in this browser: typing still works
+  mic.addEventListener('click', () => { if (P.listening()) P.stopListening(); else P.listen(); });
+
+  // Stop shows while a reply is being written or spoken.
+  setInterval(() => { stop.hidden = !(Roamie.voiceOut?.playing?.() || window.RoamieBusy); }, 250);
+  stop.addEventListener('click', () => { P.stop(); window.RoamieBusy = false; });
+  const host = window.__roamieHost;
+  window.__roamieHost = (m) => {
+    if (m.kind === 'agent') { if (m.e?.type === 'start') window.RoamieBusy = true; else if (m.e?.type === 'done' || m.e?.type === 'error') window.RoamieBusy = false; }
+    host(m);
+  };
+})();
+</script>
+</body>
+</html>

@@ -19,6 +19,7 @@ import fs from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import {
   addFact, repeatLabel, startOfDay, applyFold, approxTokens, archiveFolded, clearFacts, clearFinished, compactTrigger, fitContext, flushWrites, forgetFact, isSummary, listItems, listFacts, nextDue, pickFacts, planFold,
@@ -28,6 +29,7 @@ import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, 
 import { EMOTES, EchoFilter, ReplyStream } from './reply.mjs';
 import { downloadModel, isReady, modelDir, sizeLabel, totalBytes } from './voicemodel.mjs';
 import { copyText, createTools, expand, fitImage, imageBlock, winOpen } from './tools.mjs';
+import { PHONE_BLOCKED_TOOLS, bridgeHost, pairingToken, phoneBlockedNote, startBridge } from './bridge.mjs';
 import { describeMarks } from './marks.mjs';
 import { faviconFor } from './draw.mjs';
 import { QUESTIONS, openNote, answerTurn, wantsSkip, endsChat, splitTurn, plain, stripNote, tourBeats, goalFrom, showcaseBeats } from './intro.mjs';
@@ -54,7 +56,13 @@ let intro = null; // the get-to-know-you chat, while it's on
 // The get-to-know-you chat runs in the guide window: its replies and voice go there, not to the desktop.
 // A reply's voice keeps going where it started, even after the chat ends mid-sentence; "stop" goes to both.
 const guideVoices = new Set();
+// The phone bridge (bridge.mjs): while a request that came from a paired phone runs, what would go to the desktop
+// overlay goes to the phone instead, and so does that reply's voice until it ends.
+let bridge = null, phoneTurn = false;
+const phoneVoices = new Set();
 const ui = (msg) => {
+  if (msg.kind === 'speech' && phoneVoices.has(msg.id)) { if (msg.end) phoneVoices.delete(msg.id); bridge?.send({ type: 'ui', msg }); return; }
+  if (phoneTurn && !(msg.kind === 'speech' && msg.stop)) { bridge?.send({ type: 'ui', msg }); return; }
   if (msg.kind === 'speech') {
     if (msg.stop) { send({ type: 'onboard', msg }); return send({ type: 'ui', msg }); }
     if (guideVoices.has(msg.id)) { if (msg.end) guideVoices.delete(msg.id); return send({ type: 'onboard', msg }); }
@@ -368,6 +376,12 @@ const { tools, hands, whereNow, ink, nextTurn } = createTools({
   onInkGone: (why) => logLine('ink_gone', { why }),
   askShell: (msg) => shellCall(msg),
 });
+// A request from the phone can't use the tools that act on this computer's screen, apps or disk.
+for (const t of tools) {
+  if (!PHONE_BLOCKED_TOOLS.has(t.name)) continue;
+  const run = t.execute;
+  t.execute = (...a) => { if (phoneTurn) throw new Error(phoneBlockedNote(t.name)); return run(...a); };
+}
 // The app's own manual, read when they ask about Roamies rather than sent with every request.
 tools.push({
   name: 'about_roamies',
@@ -634,10 +648,10 @@ let credsBaseUrl;
 
 // One run at a time: a new request waits for (or interrupts) the current one. Folding waits until none is left.
 let queued = 0;
-function enqueue(text, { interrupt = false, image = null, note = '', byVoice = false } = {}) {
+function enqueue(text, { interrupt = false, image = null, note = '', byVoice = false, from = '' } = {}) {
   if (interrupt && busy) interruptQuietly('new request');
   queued++;
-  running = running.then(() => prompt(text, image, note, byVoice)).catch((e) => console.error('prompt', e))
+  running = running.then(async () => { phoneTurn = from === 'phone'; try { await prompt(text, image, note, byVoice); } finally { phoneTurn = false; } }).catch((e) => console.error('prompt', e))
     .finally(() => { if (--queued === 0) maybeCompact(); });
   return running;
 }
@@ -931,6 +945,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
   const voice = VOICE_ON() ? speech.start() : (speech.stop(), null);
   turnVoice = voice;
   if (voice && intro) guideVoices.add(voice.id);
+  if (voice && phoneTurn) phoneVoices.add(voice.id);
   let saidAt = 0; // when the first sentence went to the voice, for the log's time-to-speech
   const spoken = voice && new SpeechText((t) => { saidAt ||= Date.now(); voice.say(t); });
   let stalled = false, watch = null;
@@ -962,7 +977,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     logLine('request', { turn, model: config.model, chars: text.length, image: !!image, session: session?.id });
     const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0 };
     const soon = frontSoon; frontSoon = null;
-    frontNow = soon && Date.now() - soon.at < 8000 ? await soon.p : await whereNow();
+    frontNow = phoneTurn ? "The user is asking from their phone, away from this computer: they can't see its screen." : soon && Date.now() - soon.at < 8000 ? await soon.p : await whereNow();
     const quiz = takeQuizNote();
     const stamped = `[${stampNow()}] ${text}${quiz ? `\n(${quiz})` : ''}`;
     // An area snap rides along as an image in the same message.
@@ -1987,6 +2002,34 @@ async function onGuide(m) {
     config.onboarded = true; config.onboardStep = 0; config.setupVersion = SETUP_VERSION; saveConfig();
   }
 }
+
+// ---------- the phone bridge ----------
+// What a paired phone sends (bridge.mjs lets through only these types). A request runs like one typed or spoken
+// here, marked as the phone's so its reply goes back there.
+function onPhone(m) {
+  if ((m.type === 'ask' || m.type === 'voice') && typeof m.text === 'string' && m.text.trim()) {
+    logLine('phone_request', { via: m.type, chars: m.text.trim().length });
+    // A new phone request replaces the phone's own running one; one asked at the computer is left to finish first.
+    enqueue(m.text.trim().slice(0, 8000), { interrupt: phoneTurn, byVoice: m.type === 'voice', from: 'phone' });
+  } else if (m.type === 'answer' && typeof m.id === 'string') { pending.get(m.id)?.(typeof m.text === 'string' ? m.text : null); pending.delete(m.id); }
+  else if (m.type === 'stop') { if (busy && phoneTurn) { logLine('stopped', { by: 'phone' }); controller?.abort(); } for (const id of phoneVoices) bridge?.send({ type: 'ui', msg: { kind: 'speech', id, stop: true } }); }
+  else if (m.type === 'ui_ready') {
+    for (const msg of [{ kind: 'sound', on: config.sound }, { kind: 'look', look: config.look ?? 'classic' }, { kind: 'summon', show: true }]) bridge?.send({ type: 'ui', msg });
+  }
+}
+// Off unless ROAMIES_BRIDGE says where to listen: "tailscale" (this computer's Tailscale address) or "local".
+async function openBridge() {
+  if (!process.env.ROAMIES_BRIDGE) return;
+  const host = bridgeHost(process.env.ROAMIES_BRIDGE);
+  if (!host) { logLine('bridge_off', { why: 'no address', asked: String(process.env.ROAMIES_BRIDGE).slice(0, 40) }); return; }
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  // Bundled: the phone page ships beside this file (bundle.sh). From source: the showcase folder itself.
+  const root = existsSync(path.join(here, 'phone', 'phone.html')) ? path.join(here, 'phone') : path.resolve(here, '..', '..');
+  try {
+    bridge = await startBridge({ host, port: +process.env.ROAMIES_BRIDGE_PORT || undefined, token: pairingToken(path.dirname(LOG_DIR)), root, version: VERSION, onMessage: onPhone, log: logLine });
+  } catch (e) { logLine('bridge_off', { why: String(e?.message ?? e).slice(0, 200) }); }
+}
+openBridge();
 
 // ---------- main ----------
 createInterface({ input: process.stdin }).on('line', (line) => {
