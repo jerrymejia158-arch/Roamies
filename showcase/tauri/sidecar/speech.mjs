@@ -5,7 +5,7 @@
 // - markdown, links, URLs, emoji, file paths and long code are dropped from what's said.
 const SENTENCE_END = /[.!?…]+["'”’)\]]*(?=\s)/g;
 const SCREEN_ONLY = /^\s*(?:[-*•+]\s|\d{1,2}[.)]\s|>|#{1,6}\s|\||sources?\s*:)/i;
-const LONG = 220; // speak a run-on sentence in pieces rather than wait for its end
+const LONG = 160; // speak a run-on sentence in pieces rather than wait for its end (160: speech starts sooner on a local voice)
 
 // Fish Audio S2 voice cues: [chuckling], [warm], [break]… shape how a line is said (tested on the JARVIS voice:
 // they're performed, not read out). Only these are kept for the voice; on screen they're never shown.

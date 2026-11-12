@@ -931,7 +931,8 @@ async function prompt(text, image = null, note = '', byVoice = false) {
   const voice = VOICE_ON() ? speech.start() : (speech.stop(), null);
   turnVoice = voice;
   if (voice && intro) guideVoices.add(voice.id);
-  const spoken = voice && new SpeechText((t) => voice.say(t));
+  let saidAt = 0; // when the first sentence went to the voice, for the log's time-to-speech
+  const spoken = voice && new SpeechText((t) => { saidAt ||= Date.now(); voice.say(t); });
   let stalled = false, watch = null;
   try {
     // Voice: a short first line before a tool ("On it, checking Paris.") is a beat: it's spoken, but not
@@ -976,7 +977,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     watch = stallWatch(STALL_MS, () => { stalled = true; logLine('stalled', { turn, ms: Date.now() - use.t }); ctl.abort(); });
     for await (const e of agentEvents(agent.prompt(content))) {
       watch.event(e);
-      if (e.type === 'text_delta') { const t = echo.push(e.text); reply.push(t); if (fresh) { lastReply = ''; fresh = false; } lastReply += t; }
+      if (e.type === 'text_delta') { if (!use.first && e.text.trim()) { use.first = Date.now() - use.t; logLine('first_text', { turn, ms: use.first }); } const t = echo.push(e.text); reply.push(t); if (fresh) { lastReply = ''; fresh = false; } lastReply += t; }
       else if (e.type === 'turn_end') {
         doneWriting();
         fresh = true;
@@ -1037,7 +1038,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     autoTurn = listen ? turn : null;
     ui({ kind: 'agent', e: stalled ? { type: 'error', message: stallMessage(), speech: voice?.id ?? null } : { type: 'done', speech: voice?.id ?? null, ...(listen ? { listen } : {}) } });
     logUsage({ ...use, ms: Date.now() - use.t });
-    logLine('request_done', { turn, ms: Date.now() - use.t, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
+    logLine('request_done', { turn, ms: Date.now() - use.t, firstText: use.first ?? null, firstSpeech: saidAt ? saidAt - use.t : null, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
   } catch (err) {
     lastFailed = true;
     if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); voice?.end(); }
