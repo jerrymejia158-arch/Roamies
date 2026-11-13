@@ -55,3 +55,20 @@ the computer's own on-device recognition.
 
 - Reminders fire on the computer only; the phone sees them once it has its own brain and sync.
 - The floating creature over other apps, and tapping in apps for you, need the Android app.
+
+## The Android app (`showcase/android`)
+
+A small Tauri app whose window is the same phone page, packed into the app. It asks once for the computer's
+Tailscale address and the pairing code, then talks to the bridge like the browser page does.
+
+Needs Android Studio (SDK, NDK, command-line tools), `JAVA_HOME`, `ANDROID_HOME` and `NDK_HOME` set, and the Rust
+Android targets (`rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`).
+
+```sh
+cd showcase/android
+./build.sh                                   # the page's files into dist/
+cd src-tauri && cargo tauri android init     # once: makes the Android project in gen/android
+cargo tauri android build --debug --apk      # an APK to install on the phone
+```
+
+In the app, talking needs Android's own speech recognition (a WebView has none), which isn't built yet: type for now.

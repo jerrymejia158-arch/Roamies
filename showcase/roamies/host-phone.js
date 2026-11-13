@@ -16,6 +16,18 @@
   const qs = new URLSearchParams(location.search);
   // Where the bridge is: ?bridge=wss://host/ws, a saved address, else the server this page came from.
   const bridgeUrl = () => qs.get('bridge') || store.get('roamies.bridge') || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  // Inside the Android app the page comes from the app itself, not from the computer, so the computer's address
+  // has to be given once (its Tailscale name). In a browser the page is served by the bridge it then talks to.
+  const embedded = location.hostname === 'tauri.localhost' || !/^https?:$/.test(location.protocol) || qs.has('embedded'); // ?embedded: to try it in a browser
+  // "pc.tailnet.ts.net", "https://pc.tailnet.ts.net/" or a full ws(s):// address → the bridge's socket address.
+  const socketAddress = (v) => {
+    const t = String(v ?? '').trim();
+    if (!t) return null;
+    if (/^wss?:\/\//i.test(t)) return t;
+    const m = /^(https?):\/\/([^/]+)/i.exec(t), host = m ? m[2] : t.replace(/\/.*$/, '');
+    if (!/^[a-z0-9.-]+(:\d+)?$/i.test(host)) return null;
+    return `${m && m[1].toLowerCase() === 'http' ? 'ws' : 'wss'}://${host}/ws`;
+  };
   let token = store.get('roamies.pair');
   const fromHash = /(?:^|[#&])pair=([^&]+)/.exec(location.hash);
   if (fromHash) {
@@ -35,7 +47,7 @@
 
   function connect() {
     clearTimeout(retryTimer);
-    if (!token) { setLink('off'); return; }
+    if (!token || (embedded && !qs.get('bridge') && !store.get('roamies.bridge'))) { setLink('off'); return; }
     if (ws && ws.readyState <= 1) return;
     setLink('connecting');
     let sock;
@@ -132,7 +144,14 @@
     state,
     onChange: (f) => { listeners.add(f); f(state); return () => listeners.delete(f); },
     paired: () => state.link === 'paired',
-    pair(t) { token = String(t ?? '').trim() || null; store.set('roamies.pair', token); retry = 0; if (ws) { const old = ws; ws = null; old.close(); } connect(); },
+    needsAddress: embedded,
+    address: () => store.get('roamies.bridge') || '',
+    // addr: the computer's address, needed in the app. False when it isn't one (nothing is changed then).
+    pair(t, addr) {
+      if (addr != null && String(addr).trim()) { const a = socketAddress(addr); if (!a) return false; store.set('roamies.bridge', a); }
+      token = String(t ?? '').trim() || null; store.set('roamies.pair', token); retry = 0; if (ws) { const old = ws; ws = null; old.close(); } connect();
+      return true;
+    },
     unpair() { this.pair(null); setLink('off'); },
     ask: (text) => { const t = String(text ?? '').trim(); if (t) sendBrain({ type: 'ask', text: t }); },
     stop: () => { sendBrain({ type: 'stop' }); window.Roamie?.voiceOut?.stop(); },

@@ -1,0 +1,19 @@
+[package]
+name = "roamies-phone"
+version = "0.1.0"
+description = "Roamies on a phone: the creature page in an Android app"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+# Its own workspace: built apart from the desktop app, with its own lock file.
+[workspace]
+
+[lib]
+name = "roamies_phone_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The phone page's window. The page uses no Tauri commands: it talks to the brain over its own socket.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

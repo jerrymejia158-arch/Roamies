@@ -39,6 +39,7 @@
   #pair form { width: 100%; max-width: 360px; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
   #pair h1 { margin: 0 0 6px; font: 800 22px/1.2 "Doto", "Martian Mono", monospace; }
   #pair p { margin: 0 0 14px; color: var(--quiet); font-size: 13px; }
+  #pair input[hidden] { display: none; }
   #pair input { width: 100%; box-sizing: border-box; height: 44px; padding: 0 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font: inherit; }
   #pair button { width: 100%; background: var(--accent); border-color: var(--accent); color: #06121c; border-radius: 10px; }
   #pair .err { color: var(--bad); min-height: 18px; margin: 0 0 8px; }
@@ -61,6 +62,7 @@
     <h1 id="pair-title">Pair with your computer</h1>
     <p>Type the pairing code from the computer that runs Roamies. It is kept in this browser only.</p>
     <p class="err" id="pair-err" role="alert"></p>
+    <input id="pair-addr" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Your computer's Tailscale address" placeholder="your-pc.tailnet.ts.net" hidden>
     <input id="pair-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Pairing code" placeholder="Pairing code">
     <button type="submit">Pair</button>
   </form>
@@ -123,7 +125,17 @@
     mic.setAttribute('aria-pressed', String(P.listening()));
     mic.textContent = P.listening() ? 'Send' : 'Talk';
   });
-  $('pair-form').addEventListener('submit', (e) => { e.preventDefault(); const v = $('pair-code').value; $('pair-code').value = ''; if (v.trim()) P.pair(v); });
+  // In the Android app the computer's address is asked for too (in a browser the page already came from it).
+  const addr = $('pair-addr');
+  if (P.needsAddress) { addr.hidden = false; addr.value = P.address().replace(/^wss?:\/\//, '').replace(/\/ws$/, ''); }
+  $('pair-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = $('pair-code').value;
+    if (!v.trim()) return;
+    if (P.needsAddress && !addr.value.trim()) { $('pair-err').textContent = "Type your computer's Tailscale address too."; addr.focus(); return; }
+    if (!P.pair(v, P.needsAddress ? addr.value : null)) { $('pair-err').textContent = "That address doesn't look right. It should be like your-pc.tailnet.ts.net."; addr.focus(); return; }
+    $('pair-code').value = '';
+  });
 
   const send = () => { const t = text.value.trim(); if (!t) return; text.value = ''; grow(); P.ask(t); text.blur(); };
   const grow = () => { text.style.height = 'auto'; text.style.height = `${Math.min(120, text.scrollHeight)}px`; safe(); };
