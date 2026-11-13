@@ -69,11 +69,14 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && state.link !== 'paired') { retry = 0; connect(); } });
 
   // ---------- the shell's stand-in ----------
+  const DRAWING = new Set(['draw_started', 'draw_done', 'draw_wait_done', 'ink_closed', 'ink_action', 'ink_cleared', 'quiz_done', 'list_toggle']);
   const toBrain = (msg) => {
     if (!msg || typeof msg.type !== 'string') return;
     if (msg.type === 'ui_ready') { wantReady = true; raw(msg); return; }
     if (msg.type === 'menu') { if (msg.id === 'stop') sendBrain({ type: 'stop' }); return; } // the page's Esc: stop the reply
     if (msg.type === 'answer' || msg.type === 'reply_said') sendBrain(msg);
+    // This page's own drawing reporting back (a card shown, closed, a button or quiz answered) and its list ticked.
+    else if (DRAWING.has(msg.type)) sendBrain(msg);
     // Everything else the page says is for the desktop shell or its helpers: nothing to do on a phone.
   };
   window.__TAURI__ = {

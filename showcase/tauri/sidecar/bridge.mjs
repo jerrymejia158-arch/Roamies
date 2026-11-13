@@ -20,11 +20,33 @@ export const DEFAULT_PORT = 3917;
 
 // Tools that act on this computer's screen, apps or disk. A request that came from the phone can't use them:
 // the person isn't looking at this screen, and a phone shouldn't be able to run commands here.
-export const PHONE_BLOCKED_TOOLS = new Set(['take_screenshot', 'list_windows', 'read_window', 'act_in_app', 'draw', 'see_photo', 'run_command', 'write_file', 'open']);
+export const PHONE_BLOCKED_TOOLS = new Set(['take_screenshot', 'list_windows', 'read_window', 'act_in_app', 'run_command', 'write_file', 'open']);
 export const phoneBlockedNote = (name) => `${name} works on the computer's own screen and files, and this request came from the phone. Answer without it, or say it has to be asked at the computer.`;
 
-/** What a phone may send. Everything else is dropped. */
-export const PHONE_TYPES = new Set(['ask', 'voice', 'answer', 'stop', 'ui_ready', 'reply_said', 'ping']);
+/** What a phone may send. Everything else is dropped. The second line is the phone page's own drawing reporting
+ *  back (a card shown, closed or clicked) and its list being ticked. */
+export const PHONE_TYPES = new Set(['ask', 'voice', 'answer', 'stop', 'ui_ready', 'reply_said', 'ping',
+  'draw_started', 'draw_done', 'draw_wait_done', 'ink_closed', 'ink_action', 'ink_cleared', 'quiz_done', 'list_toggle']);
+
+// A drawing asked for from the phone is drawn on the phone's own page. That page has no window of theirs to point
+// at, so only the cards (and a button that asks a follow-up) can be drawn there.
+const PHONE_EXTRAS = new Set(['emote', 'sfx']);
+/** Why a draw call can't be drawn on a phone, or '' when it can. `cards`: the card kinds (draw.mjs CARDS). */
+export function phoneDrawProblem(args, cards) {
+  const ok = new Set(cards), bad = [];
+  if (args?.target && args.target !== 'front') bad.push(`target "${String(args.target).slice(0, 40)}" (leave target out)`);
+  for (const [i, b] of (args?.beats ?? []).entries()) {
+    if (b?.wait) bad.push(`beat ${i + 1}: wait "${b.wait}" (there are no clicks to wait for)`);
+    for (const m of b?.marks ?? []) {
+      const where = `beat ${i + 1} ${m?.kind}`;
+      if (m?.kind === 'button') { if (m.at || m.action?.do !== 'ask') bad.push(`${where}: only a button that asks a follow-up (action do "ask", no at)`); continue; }
+      if (!ok.has(m?.kind) && !PHONE_EXTRAS.has(m?.kind)) { bad.push(`${where}: marks on the screen can't be drawn`); continue; }
+      if (m.at || m.to || m.tie) bad.push(`${where}: leave out at, to and tie`);
+    }
+  }
+  if (!bad.length) return '';
+  return `This request came from the phone, and the drawing shows on the phone's own page: there is no window of theirs to point at. Draw it again with cards only (${cards.join(', ')}), no places and no waits. Not possible there: ${bad.slice(0, 6).join('; ')}.`;
+}
 
 /** The Sec-WebSocket-Accept value for a client's key. */
 export const acceptKey = (key) => createHash('sha1').update(key + WS_GUID).digest('base64');

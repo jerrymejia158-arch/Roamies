@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { FrameReader, PHONE_BLOCKED_TOOLS, acceptKey, bridgeHost, encodeFrame, pairingToken, startBridge, staticFile, tailscaleAddress, tokenOk } from '../bridge.mjs';
+import { FrameReader, PHONE_BLOCKED_TOOLS, PHONE_TYPES, acceptKey, bridgeHost, encodeFrame, pairingToken, phoneDrawProblem, startBridge, staticFile, tailscaleAddress, tokenOk } from '../bridge.mjs';
 
 // ---------- pure parts ----------
 assert.equal(acceptKey('dGhlIHNhbXBsZSBub25jZQ=='), 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='); // the RFC 6455 example
@@ -46,7 +46,26 @@ for (const refused of ['0.0.0.0', '192.168.1.20', '::', 'example.com', '', 'off'
 assert.equal(bridgeHost('tailscale', { eth: ifaces.eth }), null); // no Tailscale: off, not a fallback to the LAN
 
 for (const t of ['run_command', 'write_file', 'act_in_app', 'take_screenshot', 'open']) assert.ok(PHONE_BLOCKED_TOOLS.has(t), t);
-for (const t of ['remember_commitment', 'fetch_url', 'forget_fact']) assert.ok(!PHONE_BLOCKED_TOOLS.has(t), t);
+for (const t of ['remember_commitment', 'fetch_url', 'forget_fact', 'draw', 'show_list']) assert.ok(!PHONE_BLOCKED_TOOLS.has(t), t);
+
+// A drawing from the phone: cards only, nothing that needs this computer's screen.
+{
+  const CARDS = ['card', 'note', 'list', 'timeline', 'quiz'];
+  const says = (marks, extra = {}) => phoneDrawProblem({ beats: [{ say: 'x', marks, ...extra }] }, CARDS);
+  assert.equal(says([{ kind: 'timeline', events: [{ when: '1783', text: 'a' }] }, { kind: 'note', text: 'n' }]), '');
+  assert.equal(says([{ kind: 'emote', name: 'hype' }, { kind: 'button', text: 'More', action: { do: 'ask', value: 'tell me more' } }]), '');
+  assert.equal(phoneDrawProblem({ edit: [{ do: 'clear' }] }, CARDS), '', 'edits alone');
+  assert.match(says([{ kind: 'ring', at: { text: 'Share' } }]), /beat 1 ring: marks on the screen can't be drawn/);
+  assert.match(says([{ kind: 'card', text: 'c', tie: { text: 'Export' } }]), /leave out at, to and tie/);
+  assert.match(says([{ kind: 'note', text: 'n' }], { wait: 'click' }), /no clicks to wait for/);
+  assert.match(says([{ kind: 'button', text: 'Open', action: { do: 'open', value: 'https://example.com' } }]), /only a button that asks/);
+  assert.match(says([{ kind: 'type', text: 'hello', at: { text: 'Search' } }]), /can't be drawn/);
+  assert.match(says([{ kind: 'copy', text: 'secret' }]), /can't be drawn/); // the clipboard is this computer's
+  assert.match(phoneDrawProblem({ target: 'Chrome', beats: [{ say: 'x', marks: [{ kind: 'note', text: 'n' }] }] }, CARDS), /leave target out/);
+  assert.match(says([{ kind: 'ring', at: { text: 'a' } }]), /cards only \(card, note, list, timeline, quiz\)/);
+}
+for (const t of ['draw_started', 'draw_wait_done', 'ink_closed', 'ink_action', 'ink_cleared', 'quiz_done', 'list_toggle']) assert.ok(PHONE_TYPES.has(t), t);
+for (const t of ['menu', 'panel_key', 'user_click', 'open_link', 'update_status', 'show_list']) assert.ok(!PHONE_TYPES.has(t), t);
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'roamies-bridge-'));
 const root = path.join(tmp, 'web');

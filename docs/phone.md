@@ -34,8 +34,19 @@ home screen. Typing works over plain `http://100.x.y.z:3917/` too (`ROAMIES_BRID
 
 A request from the phone runs in the same brain, with the same memory and reminders, and its reply (text and
 voice) goes back to the phone only. It cannot use the tools that act on the computer's own screen, apps or disk:
-`take_screenshot`, `list_windows`, `read_window`, `act_in_app`, `draw`, `see_photo`, `run_command`, `write_file`,
-`open`. A phone can only send these messages: `ask`, `voice`, `answer`, `stop`, `ui_ready`, `reply_said`.
+`take_screenshot`, `list_windows`, `read_window`, `act_in_app`, `run_command`, `write_file`, `open`.
+
+`draw` works from the phone, on the phone's own page: cards only (timeline, list, note, bars, flow, map, quiz and
+the rest), with no marks on a window, no places and no waits for a click. The list card (`show_list`) shows there
+too, and ticking an item on the phone ticks it in the brain.
+
+A phone can only send these messages: `ask`, `voice`, `answer`, `stop`, `ui_ready`, `reply_said`, and its own
+page's drawing and list events (`draw_started`, `draw_done`, `draw_wait_done`, `ink_closed`, `ink_action`,
+`ink_cleared`, `quiz_done`, `list_toggle`).
+
+Signed in with Claude, Roamies runs its tools through Claude Code, so a machine-wide Claude Code rule that denies
+`mcp__*` (managed-settings.json) blocks every Roamies tool, on the desktop too. Allow the ones you want by name
+(`mcp__gg__draw`, `mcp__gg__show_list`, `mcp__gg__remember_commitment` and so on).
 
 Voice in uses the phone browser's speech recognition. In Chrome on Android that sends audio to Google, unlike
 the computer's own on-device recognition.

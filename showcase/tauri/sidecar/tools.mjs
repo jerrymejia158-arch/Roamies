@@ -588,8 +588,10 @@ export function createTools({ allowActions, ui, ask, openUrl, onCommitments, sho
     const stopped = () => { if (ctx?.signal?.aborted) clearAllInk(); return 'Stopped.'; };
     // Where there's room for cards: the screen minus the front window; and what's on it, so names avoid covering words.
     const hasCards = beats.some((b) => b.marks.some((m) => CARDS.includes(m.kind)));
-    const win = hasCards && HANDS ? (await hands('locate', 'front').catch(() => null))?.window?.bounds ?? null : null;
-    const busy = lastRead?.turn === turn ? lastRead.controls.filter((c) => !c.offscreen && c.bounds).slice(0, 300).map((c) => c.bounds) : [];
+    // opts.phone: drawn on the phone's page (bridge.mjs), which has no window of this computer's to keep clear of
+    // or belong to, so its cards are loose like the tour's.
+    const win = hasCards && HANDS && !opts.phone ? (await hands('locate', 'front').catch(() => null))?.window?.bounds ?? null : null;
+    const busy = opts.phone ? [] : lastRead?.turn === turn ? lastRead.controls.filter((c) => !c.offscreen && c.bounds).slice(0, 300).map((c) => c.bounds) : [];
     ink.active++;
     // Lookups are shared until a click or hover (then the screen may have changed, and words are retried a moment).
     let look = null;
@@ -612,7 +614,7 @@ export function createTools({ allowActions, ui, ask, openUrl, onCommitments, sho
         if (ctx?.signal?.aborted) return stopped();
         const ids = parts.assign(seg);
         drawn.push(...ids.map((p) => [p, parts.get(p)]));
-        if (opts.fade) for (const p of ids) loose.add(p);
+        if (opts.fade || opts.phone) for (const p of ids) loose.add(p);
         // Only a few cards stay up at once (the overlay closes the oldest as each new one is drawn), so the oldest are
         // forgotten here too. Eight cards at once covered the screen, and the last one landed on top of the first.
         else for (const p of parts.trimCards(LIMITS.cardsShown, (q) => loose.has(q))) { shut.push(p); buttons.delete(p); }

@@ -29,7 +29,8 @@ import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, 
 import { EMOTES, EchoFilter, ReplyStream } from './reply.mjs';
 import { downloadModel, isReady, modelDir, sizeLabel, totalBytes } from './voicemodel.mjs';
 import { copyText, createTools, expand, fitImage, imageBlock, winOpen } from './tools.mjs';
-import { PHONE_BLOCKED_TOOLS, bridgeHost, pairingToken, phoneBlockedNote, startBridge } from './bridge.mjs';
+import { PHONE_BLOCKED_TOOLS, bridgeHost, pairingToken, phoneBlockedNote, phoneDrawProblem, startBridge } from './bridge.mjs';
+import { CARDS as DRAW_CARDS } from './draw.mjs';
 import { describeMarks } from './marks.mjs';
 import { faviconFor } from './draw.mjs';
 import { QUESTIONS, openNote, answerTurn, wantsSkip, endsChat, splitTurn, plain, stripNote, tourBeats, goalFrom, showcaseBeats } from './intro.mjs';
@@ -378,8 +379,15 @@ const { tools, hands, whereNow, ink, nextTurn } = createTools({
 });
 // A request from the phone can't use the tools that act on this computer's screen, apps or disk.
 for (const t of tools) {
-  if (!PHONE_BLOCKED_TOOLS.has(t.name)) continue;
   const run = t.execute;
+  // A drawing asked for from the phone is drawn on the phone's page: cards only, with no window here to belong to.
+  if (t.name === 'draw') t.execute = (args, ctx, opts) => {
+    if (!phoneTurn) return run(args, ctx, opts);
+    const problem = phoneDrawProblem(args, DRAW_CARDS);
+    if (problem) throw new Error(problem);
+    return run(args, ctx, { ...opts, phone: true });
+  };
+  if (!PHONE_BLOCKED_TOOLS.has(t.name)) continue;
   t.execute = (...a) => { if (phoneTurn) throw new Error(phoneBlockedNote(t.name)); return run(...a); };
 }
 // The app's own manual, read when they ask about Roamies rather than sent with every request.
@@ -701,12 +709,14 @@ function showcaseDrawn() {
 function warmShowcase() { for (const b of showcaseBeats(userName)) for (const m of b.marks) for (const s of m.sources ?? []) if (checkDrawAction({ kind: 'favicon', url: s.url }).level === SAFE) faviconFor(s.url).catch(() => {}); }
 function stopShowcase() { if (!showcase) return; endShowcase('gone'); ink.clear(); }
 // A next-step button on a drawing: ask sends its words as a new request; open and copy are checked again first.
-function onInkButton(part) {
+function onInkButton(part, from = '') {
   const a = ink.button(part);
   if (!a) return;
   const v = checkDrawAction({ kind: 'button', action: a });
   if (v.level !== SAFE) return console.error('ink button blocked:', v.reason);
-  if (a.do === 'ask') enqueue(a.value.slice(0, 600), { interrupt: true });
+  // Tapped on the phone's page: the follow-up is the phone's request, and nothing opens or copies on this computer.
+  if (from === 'phone' && a.do !== 'ask') return;
+  if (a.do === 'ask') enqueue(a.value.slice(0, 600), { interrupt: true, from });
   else if (a.do === 'open') openUrl(a.value);
   else if (a.do === 'copy') ink.copy(a.value);
 }
@@ -977,7 +987,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     logLine('request', { turn, model: config.model, chars: text.length, image: !!image, session: session?.id });
     const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0 };
     const soon = frontSoon; frontSoon = null;
-    frontNow = phoneTurn ? "The user is asking from their phone, away from this computer: they can't see its screen." : soon && Date.now() - soon.at < 8000 ? await soon.p : await whereNow();
+    frontNow = phoneTurn ? "The user is asking from their phone, away from this computer: they can't see its screen. draw shows on the phone itself, cards only (card, note, list, timeline, bars, graph, flow, table, map, math, photo, quiz): no marks on a window, no places (at, to, tie), no waits." : soon && Date.now() - soon.at < 8000 ? await soon.p : await whereNow();
     const quiz = takeQuizNote();
     const stamped = `[${stampNow()}] ${text}${quiz ? `\n(${quiz})` : ''}`;
     // An area snap rides along as an image in the same message.
@@ -1420,16 +1430,16 @@ const shortWhen = (ms, now = Date.now()) => {
   if (ms - now < 6 * 864e5 && ms > now) return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${t}`;
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 };
-function showList({ seconds = 0, flash = null, toggle = false } = {}) {
+function showList({ seconds = 0, flash = null, toggle = false, to = ui } = {}) {
   const now = Date.now(), L = listItems(now);
   const fmt = (i) => ({ id: i.id, text: i.text, done: i.done, overdue: i.overdue, when: i.due ? `${shortWhen(i.due, now)}${i.repeat ? ' ↻' : ''}` : '' });
-  ui({ kind: 'list', today: L.today.map(fmt), later: L.later.map(fmt), seconds, flash, toggle });
+  to({ kind: 'list', today: L.today.map(fmt), later: L.later.map(fmt), seconds, flash, toggle });
 }
-async function toggleItem(id) {
+async function toggleItem(id, to = ui) {
   const c = listItems().today.concat(listItems().later).find((i) => i.id === id);
   if (!c) return;
   await updateCommitment(id, { status: c.done ? 'open' : 'done' });
-  menu(); scheduleReminders(); showList({ flash: id, seconds: 4 });
+  menu(); scheduleReminders(); showList({ flash: id, seconds: 4, to });
 }
 // Finished items stay struck through for the rest of the day; at midnight they're deleted.
 async function midnightClean() {
@@ -2013,6 +2023,14 @@ function onPhone(m) {
     enqueue(m.text.trim().slice(0, 8000), { interrupt: phoneTurn, byVoice: m.type === 'voice', from: 'phone' });
   } else if (m.type === 'answer' && typeof m.id === 'string') { pending.get(m.id)?.(typeof m.text === 'string' ? m.text : null); pending.delete(m.id); }
   else if (m.type === 'stop') { if (busy && phoneTurn) { logLine('stopped', { by: 'phone' }); controller?.abort(); } for (const id of phoneVoices) bridge?.send({ type: 'ui', msg: { kind: 'speech', id, stop: true } }); }
+  // The phone page's own drawing and list reporting back, as the overlay's do.
+  else if (m.type === 'draw_started') ink.started(String(m.id), m.seg | 0);
+  else if (m.type === 'draw_wait_done') ink.waitDone(String(m.id), m.beat | 0, String(m.result));
+  else if (m.type === 'ink_closed') ink.closed(m.part);
+  else if (m.type === 'ink_action') onInkButton(String(m.part), 'phone');
+  else if (m.type === 'quiz_done') onQuizDone(String(m.part), Array.isArray(m.picks) ? m.picks.slice(0, 12).map((v) => (Number.isInteger(v) ? v : -1)) : []);
+  else if (m.type === 'ink_cleared') ink.cleared();
+  else if (m.type === 'list_toggle') toggleItem(String(m.id), (msg) => bridge?.send({ type: 'ui', msg })).catch((e) => console.error('list', e));
   else if (m.type === 'ui_ready') {
     for (const msg of [{ kind: 'sound', on: config.sound }, { kind: 'look', look: config.look ?? 'classic' }, { kind: 'summon', show: true }]) bridge?.send({ type: 'ui', msg });
   }
