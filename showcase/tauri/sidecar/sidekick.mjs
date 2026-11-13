@@ -383,8 +383,8 @@ for (const t of tools) {
   // A drawing asked for from the phone is drawn on the phone's page: cards only, with no window here to belong to.
   if (t.name === 'draw') t.execute = (args, ctx, opts) => {
     if (!phoneTurn) return run(args, ctx, opts);
-    const problem = phoneDrawProblem(args, DRAW_CARDS);
-    if (problem) throw new Error(problem);
+    const cant = phoneDrawProblem(args, DRAW_CARDS);
+    if (cant) throw new Error(cant);
     return run(args, ctx, { ...opts, phone: true });
   };
   if (!PHONE_BLOCKED_TOOLS.has(t.name)) continue;
