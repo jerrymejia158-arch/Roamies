@@ -129,9 +129,16 @@
     wire() {
       if (this.wired) return;
       this.wired = true;
-      const onResult = (r) => { if (!rec || !r) return; const t = String(r.transcript ?? '').trim(); if (t) { heard = t; voice({ type: 'partial', text: heard }); } if (r.isFinal) finish(); };
-      const onState = (s) => { if (rec && s?.state === 'idle') finish(); };
-      const onError = (e) => { if (!rec) return; if (/PERMISSION/.test(String(e?.code))) micDenied(); finish(); };
+      const onResult = (r) => { this.alive = true; if (!rec || !r) return; const t = String(r.transcript ?? '').trim(); if (t) { heard = t; voice({ type: 'partial', text: heard }); } if (r.isFinal) finish(); };
+      const onState = (s) => { this.alive = true; if (rec && s?.state === 'idle') finish(); };
+      const onError = (e) => {
+        this.alive = true;
+        if (!rec) return;
+        const code = String(e?.code ?? '');
+        if (/PERMISSION/.test(code)) micDenied();
+        else if (!/NO_SPEECH|CANCELLED|TIMEOUT/.test(code)) this.fail('the recognizer', e?.message || code);
+        finish();
+      };
       // The plugin's events, by both of the ways it has sent them across its versions.
       const plug = native.core.addPluginListener?.bind(native.core), listenTo = native.event?.listen?.bind(native.event);
       for (const [name, f] of [['result', onResult], ['stateChange', onState], ['error', onError]]) {
@@ -141,14 +148,28 @@
       listenTo?.('stt://result', (ev) => onResult(ev.payload))?.catch?.(() => {});
       listenTo?.('stt://error', (ev) => onError(ev.payload))?.catch?.(() => {});
     },
+    alive: false,
+    // Says what went wrong, in the Roamie's bubble: on a phone there is no console to look in.
+    fail(step, e) {
+      const why = String(e?.message ?? e ?? 'no reason given').slice(0, 160);
+      console.error('stt', step, e);
+      window.__roamieHost?.({ kind: 'say', text: `Talk isn't working yet. ${step}: ${why}`, mood: 'concerned' });
+    },
     async start() {
       this.wire();
-      const p = await native.core.invoke('plugin:stt|request_permission').catch(() => null);
+      let p;
+      try { p = await native.core.invoke('plugin:stt|request_permission'); } catch (e) { this.fail('Asking for the microphone', e); return finish(); }
       if (p && (p.microphone === 'denied' || p.speechRecognition === 'denied')) { micDenied(); return finish(); }
       if (!rec) return; // stopped while the permission prompt was up
+      const can = await native.core.invoke('plugin:stt|is_available').catch(() => null);
+      if (can && can.available === false) { this.fail('Speech recognition is not available on this phone', can.reason || 'no reason given'); return finish(); }
       voice({ type: 'state', state: 'listening', mode: 'handsfree' }); tell();
-      await native.core.invoke('plugin:stt|start_listening', { config: { language: navigator.language || 'en-US', interimResults: true, continuous: false, maxDuration: 0 } })
-        .catch((e) => { console.error('stt', e); if (rec) finish(); });
+      this.alive = false;
+      try { await native.core.invoke('plugin:stt|start_listening', { config: { language: navigator.language || 'en-US', interimResults: true, continuous: false, maxDuration: 0 } }); }
+      catch (e) { this.fail('Starting to listen', e); if (rec) finish(); return; }
+      // Started, but nothing has come back at all: the recognizer's events aren't reaching the page.
+      const mine = rec;
+      setTimeout(() => { if (rec === mine && !this.alive) { this.fail('Listening started, but no words or status came back', 'events are not arriving'); finish(); } }, 9000);
     },
   };
   function listen() {
