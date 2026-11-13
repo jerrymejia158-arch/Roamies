@@ -99,6 +99,19 @@
   safe(); addEventListener('resize', safe);
   window.__roamiePtr?.(innerWidth / 2, innerHeight * 0.45, performance.now());
 
+  // A card wider than the screen (a table, wide bars): the whole page is laid out that wide and shown smaller, so
+  // nothing is cut off; pinch to zoom in. Back to normal once it's gone.
+  const vp = document.querySelector('meta[name="viewport"]'), NORMAL = vp.content;
+  let base = innerWidth, widened = 0;
+  setInterval(() => {
+    if (!widened) base = innerWidth;
+    const reach = Math.ceil((Roamie.ink?.extent ?? [0])[0]);
+    const want = reach > base ? reach + 12 : 0;
+    if (want === widened || (want && widened && want < widened)) return;
+    widened = want;
+    vp.content = want ? `width=${want}, viewport-fit=cover` : NORMAL;
+  }, 400);
+
   const LABEL = { off: 'Not paired', connecting: 'Connecting to your computer', paired: 'Using your computer\'s brain', refused: 'Pairing code not accepted', lost: 'Computer unreachable, retrying' };
   P.onChange((s) => {
     $('status').dataset.link = s.link;

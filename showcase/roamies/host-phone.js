@@ -28,7 +28,7 @@
   const state = { link: 'off', lagMs: null, brain: '' }; // link: off | connecting | paired | refused | lost
   const tell = () => { for (const f of listeners) { try { f(state); } catch { /* a listener's own problem */ } } };
   const setLink = (link) => { if (state.link !== link) { state.link = link; tell(); } };
-  let ws = null, retry = 0, retryTimer = null, pingTimer = null, wantReady = false;
+  let ws = null, retry = 0, retryTimer = null, pingTimer = null, wantReady = false, page = '';
   const outbox = []; // what the page sent while the link was down: the latest few go once it's back
   const raw = (m) => { if (ws?.readyState === 1 && state.link === 'paired') { ws.send(JSON.stringify(m)); return true; } return false; };
   const sendBrain = (m) => { if (!raw(m)) { outbox.push(m); if (outbox.length > 8) outbox.shift(); } };
@@ -46,6 +46,10 @@
       let m;
       try { m = JSON.parse(e.data); } catch { return; }
       if (m.type === 'hello' && m.ok) {
+        // The computer now serves a newer page than the one open here (Roamies was updated): load it, or this old
+        // copy would talk to the new brain with yesterday's rules.
+        if (page && m.page && m.page !== page) { location.reload(); return; }
+        page = m.page || page;
         retry = 0; state.brain = String(m.version ?? ''); setLink('paired');
         if (wantReady) raw({ type: 'ui_ready' });
         for (const o of outbox.splice(0)) raw(o);

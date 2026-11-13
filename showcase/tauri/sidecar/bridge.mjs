@@ -164,12 +164,24 @@ export function staticFile(root, urlPath) {
   return TYPES[path.extname(file).toLowerCase()] ? file : null;
 }
 
+/** An id for the phone page as it is on disk (phone.html and the shared files' names, sizes and times). A phone
+ *  whose open page was loaded from an older build sees a different id at hello and reloads itself. */
+export function pageId(root) {
+  const h = createHash('sha1');
+  try {
+    const one = (f) => { const st = fs.statSync(f); h.update(`${path.basename(f)}:${st.size}:${Math.round(st.mtimeMs)};`); };
+    one(path.join(root, 'phone.html'));
+    for (const f of fs.readdirSync(path.join(root, 'roamies')).sort()) if (f.endsWith('.js')) one(path.join(root, 'roamies', f));
+  } catch { return ''; }
+  return h.digest('hex').slice(0, 12);
+}
+
 /** Starts the bridge. onMessage(msg) gets each allowed message from a paired phone; onPaired() runs when one pairs.
  *  Resolves { address, port, send(msg), count(), close() }; send goes to every paired phone and returns how many. */
 export function startBridge({ host, port = DEFAULT_PORT, token, root, version = '', onMessage = () => {}, onPaired = () => {}, log = () => {} }) {
   if (!host) return Promise.reject(new Error('no address to listen on'));
   if (typeof token !== 'string' || token.length < 16) return Promise.reject(new Error('pairing token too short'));
-  const clients = new Set(), sockets = new Set();
+  const clients = new Set(), sockets = new Set(), page = root ? pageId(root) : '';
   let fails = [];
   const tooManyFails = () => { const now = Date.now(); fails = fails.filter((t) => now - t < FAIL_WINDOW_MS); return fails.length >= MAX_FAILS; };
 
@@ -213,7 +225,7 @@ export function startBridge({ host, port = DEFAULT_PORT, token, root, version = 
         if (!c.paired) {
           if (m.type === 'hello' && tokenOk(m.token, token)) {
             c.paired = true; clearTimeout(helloTimer); clients.add(c);
-            socket.write(encodeFrame(JSON.stringify({ type: 'hello', ok: true, version })));
+            socket.write(encodeFrame(JSON.stringify({ type: 'hello', ok: true, version, page })));
             log('bridge_paired', { phones: clients.size });
             onPaired();
           } else {

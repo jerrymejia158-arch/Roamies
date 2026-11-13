@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { FrameReader, PHONE_BLOCKED_TOOLS, PHONE_TYPES, acceptKey, bridgeHost, encodeFrame, pairingToken, phoneDrawProblem, startBridge, staticFile, tailscaleAddress, tokenOk } from '../bridge.mjs';
+import { FrameReader, PHONE_BLOCKED_TOOLS, PHONE_TYPES, acceptKey, bridgeHost, encodeFrame, pageId, pairingToken, phoneDrawProblem, startBridge, staticFile, tailscaleAddress, tokenOk } from '../bridge.mjs';
 
 // ---------- pure parts ----------
 assert.equal(acceptKey('dGhlIHNhbXBsZSBub25jZQ=='), 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='); // the RFC 6455 example
@@ -123,7 +123,14 @@ assert.equal((await fetch(`http://127.0.0.1:${bridge.port}/`, { method: 'POST' }
 const phone = await open();
 phone.send(JSON.stringify({ type: 'hello', token: TOKEN }));
 await until(() => phone.inbox.length === 1);
-assert.deepEqual(phone.inbox[0], { type: 'hello', ok: true, version: '9.9.9' });
+assert.deepEqual(phone.inbox[0], { type: 'hello', ok: true, version: '9.9.9', page: pageId(root) });
+assert.match(pageId(root), /^[0-9a-f]{12}$/);
+{ // the id changes when a page file does, and is empty (never a reload loop) when the page isn't there
+  const before = pageId(root);
+  fs.writeFileSync(path.join(root, 'roamies', 'core.js'), '// core, changed');
+  assert.notEqual(pageId(root), before);
+  assert.equal(pageId(path.join(tmp, 'nowhere')), '');
+}
 assert.equal(paired, 1);
 phone.send(JSON.stringify({ type: 'ask', text: 'what is on my list?' }));
 phone.send(JSON.stringify({ type: 'menu', id: 'quit' })); // a desktop-only message

@@ -830,6 +830,30 @@
       await card(m, w, h, function (b, l, t, x, y, age) { m.keys.forEach((k, i) => { const [kx, r, text] = at0[i], ky = y + 20 + r * 22; b.fillStyle = tone(k.tone); b.beginPath(); b.arc(x + kx + 4, ky - 4, 4, 0, Math.PI * 2); b.fill(); typed(b, text, x + kx + 14, ky, SMALL, DIM, age / 0.4); }); }, { bar: false });
     },
     async timeline(m) {
+      // A narrow screen (the phone page): the same timeline top to bottom, since the sideways one is wider than the
+      // screen from five events on. Each event is a dot on the line with its date and words beside it.
+      if (W < 520) {
+        const ev = m.events, w = clamp(W - 40, 240, 360), lx = 24, tx = 46;
+        const words = ev.map((e) => wrapRows(e.text, w - tx - 12, SMALL));
+        const ys = []; let cy = 24;
+        for (const r of words) { ys.push(cy); cy += 22 + r.length * 13 + 10; }
+        const line = handLine([lx, ys[0]], [lx, Math.max(ys.at(-1), ys[0] + 1)], { jitter: 0.5, bow: 0.006 });
+        let lp = 0; const shown = [];
+        const c = await card(m, w, 26 + cy, function (b, l, t, x, y) {
+          this.__line ??= line.map(([px, py]) => [px + x, py + y]);
+          pen(b, l, this, this.__line, lp, MID, { key: 'l', w: 2.6 });
+          ev.forEach((e, i) => {
+            const s = shown[i]; if (s == null) return; const a = t - s, py = y + ys[i];
+            chip(b, x + lx - 7, py - 7, 14, 14, '', a, { color: this.color });
+            typed(b, e.when, x + tx, py + 5, `800 15px ${DOTO}`, TEXT, a / 0.3);
+            words[i].forEach((r, k) => typed(b, r, x + tx, py + 22 + k * 13, SMALL, DIM, (a - 0.1 - k * 0.1) / 0.4));
+          });
+        }, { title: m.title || 'timeline' });
+        const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4 + 26];
+        await trace(line.map(([px, py]) => [px + x, py + y]), 0.8, (e) => (lp = e));
+        for (let i = 0; i < ev.length; i++) { await tap(x + lx, y + ys[i]); sfx('blip'); shown[i] = now(); touch(); await sleep(150); }
+        return;
+      }
       const ev = m.events, w = clamp(ev.length * 82, 320, 620);
       const xs = ev.map((_, i) => 30 + ((w - 60) * i) / Math.max(1, ev.length - 1));
       // Each event's words in full, wrapped to its own column: halfway to the next event on its side of the line (or
@@ -2097,6 +2121,9 @@
     reminders,
     get reminding() { return remOpen(); },
     get busy() { return G.playing || marks.length > 0; },
+    // How far right and down what's drawn reaches, in page points ([0, 0] when nothing is). The phone page widens
+    // its view when a card is wider than the screen.
+    get extent() { let r = 0, d = 0; for (const m of marks) if (m.alive && !m.leaving && m.card && typeof m.box === 'function') { const q = m.box(); r = Math.max(r, q[0] + q[2]); d = Math.max(d, q[1] + q[3]); } return [r, d]; },
     get playing() { return G.playing; },
     // Marks still on the real screen (frames, loops, arrows, labels): unlike cards they have no close button.
     get loose() { return marks.some((m) => m.alive && m.screen && !m.leaving); },
