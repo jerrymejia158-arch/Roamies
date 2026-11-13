@@ -72,3 +72,16 @@ cargo tauri android build --debug --apk      # an APK to install on the phone
 ```
 
 In the app, talking needs Android's own speech recognition (a WebView has none), which isn't built yet: type for now.
+
+## The brain on the phone (experiment)
+
+`showcase/android/phone-brain.sh` runs the brain itself on the phone, in Termux, with the phone's Chrome as its
+face (`http://127.0.0.1:3917/`). It needs Node 22 or newer (`pkg install -y nodejs-lts`) and an Anthropic API key:
+the Claude sign-in runs through Claude Code, which a phone can't run.
+
+```sh
+# on the computer: the bundled brain plus the script, as one file to send to the phone
+cd showcase/tauri/sidecar && ./bundle.sh && cp ../../android/phone-brain.sh dist/ && tar -czf roamies-brain.tgz -C dist .
+# in Termux
+mkdir -p ~/brain && tar -xzf ~/storage/downloads/roamies-brain.tgz -C ~/brain && bash ~/brain/phone-brain.sh
+```
