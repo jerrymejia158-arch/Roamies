@@ -3,7 +3,8 @@
 // The page answers through set_hot (click-through; set_hit_rects on Linux), set_typing (keyboard focus) and sidecar_send.
 // A no-op outside Tauri.
 (() => {
-  const invoke = window.__TAURI__?.core?.invoke;
+  // __ROAMIE_SHELL__: the phone page's stand-in for the shell (host-phone.js), which wins over a real Tauri global.
+  const invoke = window.__ROAMIE_SHELL__?.invoke ?? window.__TAURI__?.core?.invoke;
   if (!invoke) return;
   const send = (msg) => invoke('sidecar_send', { msg }).catch(() => {});
   const typing = (on) => invoke('set_typing', { on }).catch(() => {});

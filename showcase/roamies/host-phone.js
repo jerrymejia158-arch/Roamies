@@ -8,7 +8,9 @@
 //   helper sends, then sent to the brain as { type: 'voice', text }.
 // Pairing: the token is typed once (or arrives as #pair=<token>) and kept in this browser's storage.
 (() => {
-  if (window.__TAURI__) return; // inside the desktop app: the real shell is there
+  // Inside the Android app the real Tauri global is there (for speech to text): kept as `native` before host.js's
+  // stand-in below takes its place. In a browser there is none.
+  const native = window.__TAURI__?.core?.invoke ? window.__TAURI__ : null;
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* private mode: paired for this visit only */ } },
@@ -95,12 +97,11 @@
     else if (DRAWING.has(msg.type)) sendBrain(msg);
     // Everything else the page says is for the desktop shell or its helpers: nothing to do on a phone.
   };
-  window.__TAURI__ = {
-    core: {
-      invoke: (cmd, args) => {
-        if (cmd === 'sidecar_send') toBrain(args?.msg);
-        return Promise.resolve(cmd === 'buddy' ? false : null);
-      },
+  // host.js takes this in place of the shell's invoke (the Android app's real Tauri global is left alone).
+  window.__ROAMIE_SHELL__ = {
+    invoke: (cmd, args) => {
+      if (cmd === 'sidecar_send') toBrain(args?.msg);
+      return Promise.resolve(cmd === 'buddy' ? false : null);
     },
   };
 
@@ -114,7 +115,52 @@
   const voice = (m) => window.__roamieHost?.({ kind: 'voice', ...m });
   let rec = null, heard = '', sent = false;
   const listening = () => !!rec;
+  const micDenied = () => window.__roamieHost?.({ kind: 'say', text: 'I need the microphone to hear you. Allow it for Roamies, then tap Talk again.', mood: 'concerned' });
+  const finish = () => {
+    rec = null;
+    if (heard && !sent) { sent = true; voice({ type: 'final', text: heard }); sendBrain({ type: 'voice', text: heard }); }
+    voice({ type: 'state', state: 'idle', cancelled: !heard });
+    tell();
+  };
+  // In the Android app: the phone's own speech recognition, through tauri-plugin-stt. `rec` is a small handle with
+  // the same stop() and abort() the browser's recognizer has.
+  const stt = native && {
+    wired: false,
+    wire() {
+      if (this.wired) return;
+      this.wired = true;
+      const onResult = (r) => { if (!rec || !r) return; const t = String(r.transcript ?? '').trim(); if (t) { heard = t; voice({ type: 'partial', text: heard }); } if (r.isFinal) finish(); };
+      const onState = (s) => { if (rec && s?.state === 'idle') finish(); };
+      const onError = (e) => { if (!rec) return; if (/PERMISSION/.test(String(e?.code))) micDenied(); finish(); };
+      // The plugin's events, by both of the ways it has sent them across its versions.
+      const plug = native.core.addPluginListener?.bind(native.core), listenTo = native.event?.listen?.bind(native.event);
+      for (const [name, f] of [['result', onResult], ['stateChange', onState], ['error', onError]]) {
+        plug?.('stt', name, f)?.catch?.(() => {});
+        listenTo?.(`plugin:stt:${name}`, (ev) => f(ev.payload))?.catch?.(() => {});
+      }
+      listenTo?.('stt://result', (ev) => onResult(ev.payload))?.catch?.(() => {});
+      listenTo?.('stt://error', (ev) => onError(ev.payload))?.catch?.(() => {});
+    },
+    async start() {
+      this.wire();
+      const p = await native.core.invoke('plugin:stt|request_permission').catch(() => null);
+      if (p && (p.microphone === 'denied' || p.speechRecognition === 'denied')) { micDenied(); return finish(); }
+      if (!rec) return; // stopped while the permission prompt was up
+      voice({ type: 'state', state: 'listening', mode: 'handsfree' }); tell();
+      await native.core.invoke('plugin:stt|start_listening', { config: { language: navigator.language || 'en-US', interimResults: true, continuous: false, maxDuration: 0 } })
+        .catch((e) => { console.error('stt', e); if (rec) finish(); });
+    },
+  };
   function listen() {
+    if (stt) {
+      if (rec) return false;
+      heard = ''; sent = false;
+      const stop = () => native.core.invoke('plugin:stt|stop_listening').catch(() => {}).finally(() => { if (rec) setTimeout(() => { if (rec) finish(); }, 1500); });
+      rec = { stop, abort: () => { heard = ''; stop(); } };
+      stt.start();
+      tell();
+      return true;
+    }
     if (!Rec || rec) return false;
     heard = ''; sent = false;
     const r = new Rec();
@@ -127,13 +173,8 @@
       heard = text.trim();
       if (heard) voice({ type: 'partial', text: heard });
     };
-    r.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') window.__roamieHost?.({ kind: 'say', text: 'I need the microphone to hear you. Allow it for this page in the browser, then tap the mic again.', mood: 'concerned' }); };
-    r.onend = () => {
-      rec = null;
-      if (heard && !sent) { sent = true; voice({ type: 'final', text: heard }); sendBrain({ type: 'voice', text: heard }); }
-      voice({ type: 'state', state: 'idle', cancelled: !heard });
-      tell();
-    };
+    r.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') micDenied(); };
+    r.onend = finish;
     rec = r;
     try { r.start(); } catch { rec = null; return false; }
     return true;
@@ -155,7 +196,7 @@
     unpair() { this.pair(null); setLink('off'); },
     ask: (text) => { const t = String(text ?? '').trim(); if (t) sendBrain({ type: 'ask', text: t }); },
     stop: () => { sendBrain({ type: 'stop' }); window.Roamie?.voiceOut?.stop(); },
-    canListen: !!Rec,
+    canListen: !!Rec || !!stt,
     listening, listen, stopListening,
   };
   connect();

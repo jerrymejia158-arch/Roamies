@@ -17,3 +17,5 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# Speech to text. On Android this is the system's own SpeechRecognizer; its desktop engine is never built here.
+tauri-plugin-stt = "0.2"
