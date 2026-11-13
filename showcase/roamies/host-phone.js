@@ -39,7 +39,7 @@
 
   // ---------- the link ----------
   const listeners = new Set();
-  const state = { link: 'off', lagMs: null, brain: '' }; // link: off | connecting | paired | refused | lost
+  const state = { link: 'off', lagMs: null, brain: '', note: '' }; // note: a line for the status chip (what Talk is doing) // link: off | connecting | paired | refused | lost
   const tell = () => { for (const f of listeners) { try { f(state); } catch { /* a listener's own problem */ } } };
   const setLink = (link) => { if (state.link !== link) { state.link = link; tell(); } };
   let ws = null, retry = 0, retryTimer = null, pingTimer = null, wantReady = false, page = '';
@@ -117,7 +117,7 @@
   const listening = () => !!rec;
   const micDenied = () => window.__roamieHost?.({ kind: 'say', text: 'I need the microphone to hear you. Allow it for Roamies, then tap Talk again.', mood: 'concerned' });
   const finish = () => {
-    rec = null;
+    rec = null; state.note = '';
     if (heard && !sent) { sent = true; voice({ type: 'final', text: heard }); sendBrain({ type: 'voice', text: heard }); }
     voice({ type: 'state', state: 'idle', cancelled: !heard });
     tell();
@@ -155,18 +155,31 @@
       console.error('stt', step, e);
       window.__roamieHost?.({ kind: 'say', text: `Talk isn't working yet. ${step}: ${why}`, mood: 'concerned' });
     },
+    // One call to the plugin, named in the status chip while it runs. A call that never answers is an error too
+    // (ms: how long it may take; the permission prompt waits on the person, so it gets longer).
+    call(note, cmd, args, ms = 8000) {
+      state.note = note; tell();
+      return Promise.race([
+        native.core.invoke(cmd, args),
+        new Promise((_, no) => setTimeout(() => no(new Error(`no answer from ${cmd.split('|')[1]} after ${ms / 1000} s`)), ms)),
+      ]);
+    },
     async start() {
-      this.wire();
-      let p;
-      try { p = await native.core.invoke('plugin:stt|request_permission'); } catch (e) { this.fail('Asking for the microphone', e); return finish(); }
-      if (p && (p.microphone === 'denied' || p.speechRecognition === 'denied')) { micDenied(); return finish(); }
+      try { this.wire(); } catch (e) { this.fail('Setting up', e); return finish(); }
+      let p = null;
+      try { p = await this.call('Talk: checking the microphone', 'plugin:stt|check_permission'); } catch (e) { this.fail('Checking the microphone', e); return finish(); }
+      if (!rec) return;
+      if (!p || p.microphone !== 'granted') {
+        try { p = await this.call('Talk: asking for the microphone', 'plugin:stt|request_permission', undefined, 60000); } catch (e) { this.fail('Asking for the microphone', e); return finish(); }
+        if (p && (p.microphone === 'denied' || p.speechRecognition === 'denied')) { micDenied(); return finish(); }
+      }
       if (!rec) return; // stopped while the permission prompt was up
-      const can = await native.core.invoke('plugin:stt|is_available').catch(() => null);
+      const can = await this.call('Talk: finding the recognizer', 'plugin:stt|is_available').catch(() => null);
       if (can && can.available === false) { this.fail('Speech recognition is not available on this phone', can.reason || 'no reason given'); return finish(); }
-      voice({ type: 'state', state: 'listening', mode: 'handsfree' }); tell();
       this.alive = false;
-      try { await native.core.invoke('plugin:stt|start_listening', { config: { language: navigator.language || 'en-US', interimResults: true, continuous: false, maxDuration: 0 } }); }
+      try { await this.call('Talk: starting', 'plugin:stt|start_listening', { config: { language: navigator.language || 'en-US', interimResults: true, continuous: false, maxDuration: 0 } }); }
       catch (e) { this.fail('Starting to listen', e); if (rec) finish(); return; }
+      state.note = 'Listening'; voice({ type: 'state', state: 'listening', mode: 'handsfree' }); tell();
       // Started, but nothing has come back at all: the recognizer's events aren't reaching the page.
       const mine = rec;
       setTimeout(() => { if (rec === mine && !this.alive) { this.fail('Listening started, but no words or status came back', 'events are not arriving'); finish(); } }, 9000);

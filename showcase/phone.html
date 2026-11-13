@@ -117,7 +117,7 @@
   const LABEL = { off: 'Not paired', connecting: 'Connecting to your computer', paired: 'Using your computer\'s brain', refused: 'Pairing code not accepted', lost: 'Computer unreachable, retrying' };
   P.onChange((s) => {
     $('status').dataset.link = s.link;
-    $('status-text').textContent = LABEL[s.link] + (s.link === 'paired' && s.lagMs != null ? ` · ${s.lagMs} ms` : '');
+    $('status-text').textContent = s.note || LABEL[s.link] + (s.link === 'paired' && s.lagMs != null ? ` · ${s.lagMs} ms` : '');
     const needCode = s.link === 'off' || s.link === 'refused';
     pair.classList.toggle('open', needCode);
     $('pair-err').textContent = s.link === 'refused' ? 'That code was not accepted. Check it on the computer and try again.' : '';
