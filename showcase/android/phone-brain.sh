@@ -3,7 +3,8 @@
 # start on Android's Node at all": no app is involved, the phone's Chrome talks to the brain's own phone bridge.
 #   On the computer:  bundle the brain, add this script, send it over (docs/phone.md, "The brain on the phone").
 #   In Termux:        pkg install -y nodejs-lts   then   bash phone-brain.sh
-# The first run asks for an Anthropic API key (the phone can't use the Claude sign-in, which needs Claude Code).
+# With Claude Code installed and signed in in Termux, replies run through it on your Claude sign-in.
+# Without it (or with --key), the first run asks for an Anthropic API key.
 set -u
 cd "$(dirname "$0")"
 command -v node >/dev/null || { echo "Node isn't installed. Run: pkg install -y nodejs-lts"; exit 1; }
@@ -14,7 +15,18 @@ command -v termux-wake-lock >/dev/null && termux-wake-lock # keep Android from p
 
 export ROAMIES_BRIDGE=local # the phone bridge, on this phone only (127.0.0.1)
 KEYLINE=""
-if ! grep -qs anthropic "$HOME/.gg/auth.json"; then
+AUTH="$HOME/.gg/auth.json"
+if [ "${1:-}" != "--key" ] && command -v claude >/dev/null; then
+  # A Claude Code installed in Termux: replies run through it, on the Claude sign-in it already has.
+  if ! claude auth status --json 2>/dev/null | grep -q '"loggedIn": *true'; then
+    echo "Claude Code is installed but not signed in. Run:  claude   and sign in, then run this again."; exit 1
+  fi
+  export ROAMIES_CLAUDE_CODE="$(command -v claude)"
+  # The brain's own note that Claude is signed in through Claude Code (the token stays with Claude Code).
+  AUTH="$AUTH" node -e 'const fs = require("fs"), f = process.env.AUTH; let a = {}; try { a = JSON.parse(fs.readFileSync(f, "utf8")); } catch {} a["anthropic-claude-code"] = { via: "claude-code" }; fs.mkdirSync(require("path").dirname(f), { recursive: true, mode: 0o700 }); fs.writeFileSync(f, JSON.stringify(a, null, 2), { mode: 0o600 });'
+  echo "Using Claude Code at $ROAMIES_CLAUDE_CODE with your Claude sign-in."
+elif ! grep -qs '"anthropic"' "$AUTH"; then
+  [ "${1:-}" = "--key" ] || echo "No Claude Code found in Termux, so this needs an Anthropic API key."
   read -rsp "Paste your Anthropic API key, then press Enter (it won't show): " KEY; echo
   # The same message the setup guide sends when a key is typed there.
   KEYLINE=$(KEY="$KEY" node -e 'process.stdout.write(JSON.stringify({ type: "ob_apikey", provider: "anthropic", key: process.env.KEY.trim() }))')

@@ -600,6 +600,15 @@ let ccResume = null;
 // The Claude Code process when Anthropic is signed in with Claude (else null: the API, with a key or another provider).
 async function claudeCodeRoute() {
   if (config.provider !== 'anthropic' || !(await auth.hasClaudeCodeLogin().catch(() => false))) return null;
+  // ROAMIES_CLAUDE_CODE: a Claude Code that is already installed and signed in on this system, used as it is. For
+  // where Roamies has no copy of its own to download (a phone, in Termux). It keeps its sign-in in its own config
+  // folder, so that folder is left alone instead of pointed at ours.
+  const own = process.env.ROAMIES_CLAUDE_CODE;
+  if (own) {
+    const env = claudeCodeEnv();
+    if (process.env.CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR; else delete env.CLAUDE_CONFIG_DIR;
+    return { executable: own, env };
+  }
   const executable = resolveClaudeCodeBinary();
   if (!executable) throw new Error(`Claude Code isn't installed anymore. Sign in with Claude again on the Model page in ${PANEL}.`);
   return { executable, env: claudeCodeEnv() };
